@@ -1,0 +1,121 @@
+#load packages
+library(tidyverse)
+library(ERT)
+library(PanelMatch)
+
+#Create the trend data
+# Sort the data by country and year
+mpd2020 <- mpd2020 %>% arrange(country, year)
+
+# Add a new column to store the change in GDP per capita
+mpd2020 <- mpd2020 %>% group_by(country) %>%
+  mutate(gdppc_change = gdppc - lag(gdppc)) %>%
+  ungroup() %>%
+
+# If gdppc_change is positive, it means GDP per capita increased, if negative, it decreased
+mutate(gdppc_trend = ifelse(gdppc_change > 0, "Increase", ifelse(gdppc_change < 0, "Decrease", "No change")))
+mpd_filtered$gdppc_trend_numeric <- ifelse(mpd_filtered$gdppc_trend == "Increase", 1, 0)
+
+#clean data - mpd2020
+# First, create a template of all possible combinations of country and year
+country_year_template <- expand.grid(unique(mpd2020$country), min(mpd2020$year):max(mpd2020$year))
+
+# Rename columns for consistency
+names(country_year_template) <- c("country", "year")
+
+# Then, left join the template with your data frame to fill in missing combinations
+mpd_filled <- country_year_template %>%
+  left_join(mpd2020, by = c("country", "year")) %>%
+  arrange(country, year) %>%
+  ungroup()
+
+#filter data for 1900 to 2018
+# Filter out years before 1900
+mpd_filtered <- mpd_filled %>%
+filter(year >= 1900)
+
+# Merge data frames episodes and mpd based on "country" and "year" columns
+merged_data <- merge(mpd_filtered, episodes, by.x = c("country", "year"), 
+                     by.y = c("country_name", "year"))
+
+# Generate a new country identifier column
+merged_data$country_id <- as.integer(factor(merged_data$country))
+                     
+# Remove the "country_id.x" and "country_id.y" columns
+merged_data <- subset(merged_data, select = -c(country_id.x, country_id.y))
+
+# Move the country_id column to the first position
+merged_data <- merged_data[, c("country_id", setdiff(names(merged_data), "country_id"))]
+
+#Panel match Display treatment of economic data
+plot_obj <- PanelMatch::DisplayTreatment(
+  unit.id = "country_id", 
+  time.id = "year", 
+  treatment = "gdppc_trend_numeric", 
+  data = merged_data, 
+  title = "Treatment of economic growth across time 1900-2018", 
+  xlab = "year", 
+  ylab = "country", 
+  x.angle = 90,
+  hide.y.tick.label = TRUE,
+  color.of.treated = '#3399FF',
+  color.of.untreated = '#CC3333'
+)
+
+
+# Modify the plot object to reduce the number of tick labels
+plot_obj <- plot_obj +
+  scale_x_discrete(breaks = function(x) x[seq(1, length(x), by = 10)])
+
+# Print the modified plot
+print(plot_obj)
+
+#Extract a matched set of data, for further analysis, with no wheighted refinement                    
+PMResults_Econ <- PanelMatch(lag = 5, time.id = "year", unit.id = "country_id", 
+                             treatment = "gdppc_trend_numeric", refinement.method = "none", 
+                             data = merged_data, match.missing = FALSE, qoi = "att",
+                             outcome.var = "v2x_polyarchy", lead = 0:15, forbid.treatment.reversal = FALSE)
+
+#use att sorting on the panel match to arrive at a matched set
+msets.none <- PMResults_Econ$att
+
+#plot the histogram distribution
+plot(msets.none)
+
+#panel Estimates
+PE.results <- PanelEstimate(sets = PMResults_Econ, data = merged_data, se.method = "bootstrap", number.iterations = 1000, confidence.level = .95)
+
+#some results
+summary(PE.results)
+plot(PE.results)
+
+#extend the time lag to 10 year and 15 year
+PMResults_Econ_10 <- PanelMatch(lag = 10, time.id = "year", unit.id = "country_id", 
+                             treatment = "gdppc_trend_numeric", refinement.method = "none", 
+                             data = merged_data, match.missing = FALSE, qoi = "att",
+                             outcome.var = "v2x_polyarchy", lead = 0:15, forbid.treatment.reversal = FALSE)
+
+PMResults_Econ_20 <- PanelMatch(lag = 15, time.id = "year", unit.id = "country_id", 
+                                treatment = "gdppc_trend_numeric", refinement.method = "none", 
+                                data = merged_data, match.missing = FALSE, qoi = "att",
+                                outcome.var = "v2x_polyarchy", lead = 0:15, forbid.treatment.reversal = FALSE)
+
+#use att sorting on the panel match to arrive at a matched set
+msets.none_20 <- PMResults_Econ_20$att
+msets.none_10 <- PMResults_Econ_10$att
+
+#plot the histogram distribution for new set
+plot(msets.none_20)
+plot(msets.none_10)
+
+#panel Estimates
+PE.results_20 <- PanelEstimate(sets = PMResults_Econ_20, data = merged_data, se.method = "bootstrap", number.iterations = 1000, confidence.level = .95)
+
+PE.results_10 <- PanelEstimate(sets = PMResults_Econ_10, data = merged_data, se.method = "bootstrap", number.iterations = 1000, confidence.level = .95)
+
+#some results
+summary(PE.results_20)
+plot(PE.results_20)
+
+summary(PE.results_10)
+plot(PE.results_10)
